@@ -1,0 +1,15 @@
+{
+    "name": "sunnyscramble/pos-inventory",
+    "description": "Sunny & Scramble — POS & Inventory Management System (PHP / MySQL PDO)",
+    "type": "project",
+    "require": {
+        "php": ">=8.2",
+        "ext-pdo": "*",
+        "ext-pdo_mysql": "*",
+        "ext-simplexml": "*",
+        "ext-dom": "*"
+    },
+    "autoload": {
+        "psr-4": {}
+    }
+}

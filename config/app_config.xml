@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<application>
+    <meta>
+        <name>Sunny &amp; Scramble</name>
+        <version>2.0.0</version>
+        <description>POS &amp; Inventory Management System</description>
+        <author>Sunny &amp; Scramble Dev Team</author>
+        <stack>PHP + MySQL (PDO) + XML + Vanilla JavaScript</stack>
+    </meta>
+
+    <database>
+        <driver>mysql</driver>
+        <host>localhost</host>
+        <port>3306</port>
+        <name>sunny_scramble</name>
+        <user>root</user>
+        <password></password>
+        <charset>utf8mb4</charset>
+    </database>
+
+    <session>
+        <lifetime>86400</lifetime><!-- 24 hours in seconds -->
+        <name>SUNNY_SCRAMBLE_SID</name>
+        <secure>false</secure>
+        <httponly>true</httponly>
+    </session>
+
+    <security>
+        <password_algo>PASSWORD_DEFAULT</password_algo>
+        <max_login_attempts>5</max_login_attempts>
+        <lockout_duration>900</lockout_duration><!-- 15 minutes -->
+    </security>
+
+    <uploads>
+        <max_file_size>5242880</max_file_size><!-- 5MB -->
+        <allowed_types>
+            <type>image/jpeg</type>
+            <type>image/png</type>
+            <type>image/webp</type>
+        </allowed_types>
+        <upload_dir>uploads/</upload_dir>
+    </uploads>
+
+    <categories>
+        <category emoji="🍗">Chicken</category>
+        <category emoji="🥚">Egg</category>
+        <category emoji="📦">Condiments</category>
+        <category emoji="🏪">Pantry Staples</category>
+    </categories>
+
+    <roles>
+        <role level="4">superadmin</role>
+        <role level="3">owner</role>
+        <role level="2">admin</role>
+        <role level="1">staff</role>
+    </roles>
+</application>
