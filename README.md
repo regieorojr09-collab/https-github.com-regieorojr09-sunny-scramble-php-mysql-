@@ -18,6 +18,7 @@
 - [Project Directory Structure](#project-directory-structure)
 - [Prerequisites](#prerequisites)
 - [Installation & Quick Start](#installation--quick-start)
+- [Live Cloud Deployment Guide (Render, Railway, Cloud)](#live-cloud-deployment-guide)
 - [Default User Accounts](#default-user-accounts)
 - [API Reference](#api-reference)
 - [XML Integration](#xml-integration)
@@ -209,6 +210,115 @@ Or place the project directory inside `C:\xampp\htdocs\` and navigate to:
 ```
 http://localhost:8000
 ```
+
+---
+
+## Live Cloud Deployment Guide
+
+Sunny & Scramble is containerized with Docker and pre-configured with a **Render Blueprint (`render.yaml`)**, Apache rewrite rules (`.htaccess`), and remote migration utilities for zero-friction hosting on cloud platforms like **Render**, **Railway**, **Fly.io**, or any cloud VPS.
+
+### 1. Cloud Database Setup (MySQL)
+Before deploying the web application, provision a managed cloud MySQL database. Free and affordable recommendations include:
+- **Aiven for MySQL** (Free tier available)
+- **TiDB Serverless** (Free 25GB MySQL-compatible database)
+- **Railway MySQL Plugin** (One-click provision within Railway project)
+- **Clever Cloud / PlanetScale / Amazon RDS**
+
+Note your database connection details:
+- **Host**: e.g., `mysql-xxxx.aivencloud.com` or `containers-us-west-xx.railway.app`
+- **Port**: e.g., `3306` or assigned port
+- **Database Name**: e.g., `defaultdb` or `sunny_scramble`
+- **Username & Password**
+- *(Or a unified URI: `mysql://user:password@host:port/dbname`)*
+
+---
+
+### 2. Option A: Deploying on Render (Recommended)
+
+Render can build the Docker container directly from your GitHub repository:
+
+1. **Sign in to Render**: Go to [render.com](https://render.com/) and connect your GitHub account.
+2. **Create New Web Service**:
+   - Click **New +** &rarr; **Web Service**.
+   - Select your repository: `https://github.com/regieorojr09-collab/https-github.com-regieorojr09-sunny-scramble-php-mysql-`.
+   - **Environment**: Select `Docker`.
+   - **Branch**: `main`.
+3. **Configure Environment Variables**:
+   In the **Environment Variables** section, add:
+   | Key | Value | Description |
+   | :--- | :--- | :--- |
+   | `DB_HOST` | `your-db-host.com` | Cloud MySQL host |
+   | `DB_PORT` | `3306` | Cloud MySQL port |
+   | `DB_NAME` | `sunny_scramble` | Database name |
+   | `DB_USER` | `db_user` | Database username |
+   | `DB_PASS` | `your_secret_password` | Database password |
+   | `DEPLOY_TOKEN` | *Generate a random secret* | Secret key to run remote migration |
+   | `APP_DEBUG` | `false` | Disable debug error dumps |
+   *(Alternatively, provide just `DATABASE_URL=mysql://user:pass@host:port/dbname`)*
+4. **Deploy**:
+   - Click **Create Web Service**.
+   - Render will build the Docker container (`php:8.2-apache`), install required PHP extensions, configure Apache, and deploy.
+
+---
+
+### 3. Option B: Deploying on Railway
+
+1. **Sign in to Railway**: Go to [railway.app](https://railway.app/).
+2. **Create Project**: Click **New Project** &rarr; **Deploy from GitHub repo**.
+3. **Add MySQL Database**:
+   - In the same project canvas, click **+ New** &rarr; **Database** &rarr; **MySQL**.
+   - Railway will automatically provision MySQL and expose `MYSQLHOST`, `MYSQLPORT`, `MYSQLDATABASE`, `MYSQLUSER`, `MYSQLPASSWORD`, and `MYSQL_URL`.
+4. **Link Environment Variables**:
+   - In the Web Service settings, link `DATABASE_URL` to `${{MySQL.MYSQL_URL}}`.
+   - Add `DEPLOY_TOKEN=your_secure_random_key`.
+5. Railway will automatically detect the `Dockerfile` and deploy the service.
+
+---
+
+### 4. Running the Remote Database Migration
+
+Once your cloud service is live (e.g. `https://sunny-scramble.onrender.com`), run the database migration and seeder script using your secret `DEPLOY_TOKEN`:
+
+In your terminal or browser, execute:
+```bash
+curl -X GET "https://sunny-scramble.onrender.com/database/deploy_migrate.php?token=YOUR_DEPLOY_TOKEN"
+```
+Or visit the URL directly in your browser:
+```
+https://sunny-scramble.onrender.com/database/deploy_migrate.php?token=YOUR_DEPLOY_TOKEN
+```
+
+**Expected Response (`HTTP 200 OK`):**
+```json
+{
+  "status": "success",
+  "timestamp": "2026-09-13T19:31:59+08:00",
+  "tables_created_count": 12,
+  "tables": [
+    "users", "products", "suppliers", "sales", "sale_items",
+    "deliveries", "spoilages", "inventory_transactions",
+    "audit_logs", "store_config", "customer_returns", "supplier_returns"
+  ],
+  "seeding_status": "completed",
+  "default_login": {
+    "email": "admin@sunnyscramble.com",
+    "password": "admin123"
+  },
+  "message": "Sunny & Scramble database migration and initialization completed successfully!"
+}
+```
+
+---
+
+### 5. Log in & Verify
+
+Navigate to your root URL:
+```
+https://sunny-scramble.onrender.com/
+```
+Log in using:
+- **Email**: `admin@sunnyscramble.com`
+- **Password**: `admin123`
 
 ---
 

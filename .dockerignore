@@ -1,0 +1,7 @@
+.git
+.gitignore
+OLD WEB REFERENCE
+*.log
+.env
+.DS_Store
+Thumbs.db

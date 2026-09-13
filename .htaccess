@@ -1,0 +1,52 @@
+# ===============================================================
+# Sunny & Scramble POS — Apache Production Configuration
+# ===============================================================
+
+# 1. Disable Directory Browsing
+Options -Indexes
+
+# 2. Security Headers
+<IfModule mod_headers.c>
+    Header always set X-Frame-Options "SAMEORIGIN"
+    Header always set X-Content-Type-Options "nosniff"
+    Header always set X-XSS-Protection "1; mode=block"
+    Header always set Referrer-Policy "strict-origin-when-cross-origin"
+</IfModule>
+
+# 3. Block Sensitive Files & Configuration
+<FilesMatch "(^\.env|^\.git|composer\.(json|lock)|Dockerfile|render\.yaml|app_config\.xml|\.sql$)">
+    <IfModule mod_authz_core.c>
+        Require all denied
+    </IfModule>
+    <IfModule !mod_authz_core.c>
+        Order deny,allow
+        Deny from all
+    </IfModule>
+</FilesMatch>
+
+# 4. Protect Sensitive Folders
+RedirectMatch 403 ^/config/app_config\.xml$
+RedirectMatch 403 ^/\.git
+
+# 5. Enable URL Rewriting & SPA Routing
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteBase /
+
+    # Direct pass-through for existing files, directories, and assets
+    RewriteCond %{REQUEST_FILENAME} -f [OR]
+    RewriteCond %{REQUEST_FILENAME} -d
+    RewriteRule ^ - [L]
+
+    # SPA Fallback for all other routes to index.php
+    RewriteRule ^ index.php [L]
+</IfModule>
+
+# 6. Default Charset & MIME Types
+AddDefaultCharset UTF-8
+<IfModule mod_mime.c>
+    AddType application/xml .xml
+    AddType application/json .json
+    AddType image/webp .webp
+    AddType image/svg+xml .svg
+</IfModule>

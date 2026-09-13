@@ -1,0 +1,33 @@
+# ===============================================================
+# Render.com Blueprint — Sunny & Scramble POS & Inventory System
+# ===============================================================
+
+services:
+  - type: web
+    name: sunny-scramble-pos
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    autoDeploy: true
+    envVars:
+      # Database connection (Use individual vars OR a unified DATABASE_URL)
+      - key: DB_HOST
+        sync: false
+      - key: DB_PORT
+        value: 3306
+      - key: DB_NAME
+        sync: false
+      - key: DB_USER
+        sync: false
+      - key: DB_PASS
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      
+      # Secret deployment token to run database migrations remotely
+      - key: DEPLOY_TOKEN
+        generateValue: true
+
+      # Production flags
+      - key: APP_DEBUG
+        value: false

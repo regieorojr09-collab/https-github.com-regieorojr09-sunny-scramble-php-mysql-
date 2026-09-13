@@ -2,15 +2,16 @@
 /**
  * Sunny & Scramble — MySQL (PDO) Connection & Helpers
  * 
- * Provides PDO connection singleton, auto-database creation,
- * session management, and response/formatting utilities.
+ * Provides PDO connection singleton, environment variable resolution,
+ * database auto-creation / cloud DB compatibility, session management,
+ * and response/formatting utilities.
  */
 
-// ─── Load XML Config ────────────────────────────────────────────
+// ─── Load XML Config Fallback ───────────────────────────────────
 $appConfigPath = __DIR__ . '/app_config.xml';
 $appConfig = null;
 if (file_exists($appConfigPath)) {
-    $appConfig = simplexml_load_file($appConfigPath);
+    $appConfig = @simplexml_load_file($appConfigPath);
 }
 
 // ─── PDO MySQL Connection Singleton ──────────────────────────────
@@ -19,50 +20,96 @@ $pdoInstance = null;
 function getDB(): PDO {
     global $pdoInstance, $appConfig;
 
-    if ($pdoInstance === null) {
-        $host = 'localhost';
-        $port = 3306;
-        $dbName = 'sunny_scramble';
-        $user = 'root';
-        $password = '';
-        $charset = 'utf8mb4';
+    if ($pdoInstance !== null) {
+        return $pdoInstance;
+    }
 
-        if ($appConfig && isset($appConfig->database)) {
-            $host = (string)($appConfig->database->host ?? $host);
-            $port = (int)($appConfig->database->port ?? $port);
-            $dbName = (string)($appConfig->database->name ?? $dbName);
-            $user = (string)($appConfig->database->user ?? $user);
-            $password = (string)($appConfig->database->password ?? $password);
-            $charset = (string)($appConfig->database->charset ?? $charset);
+    // 1. Defaults
+    $host = 'localhost';
+    $port = 3306;
+    $dbName = 'sunny_scramble';
+    $user = 'root';
+    $password = '';
+    $charset = 'utf8mb4';
+
+    // 2. Fallback to app_config.xml if present
+    if ($appConfig && isset($appConfig->database)) {
+        $host = (string)($appConfig->database->host ?? $host);
+        $port = (int)($appConfig->database->port ?? $port);
+        $dbName = (string)($appConfig->database->name ?? $dbName);
+        $user = (string)($appConfig->database->user ?? $user);
+        $password = (string)($appConfig->database->password ?? $password);
+        $charset = (string)($appConfig->database->charset ?? $charset);
+    }
+
+    // 3. Check for unified DATABASE_URL or MYSQL_URL (Render, Railway, Heroku, etc.)
+    $databaseUrl = getenv('DATABASE_URL') ?: getenv('MYSQL_URL') ?: ($_ENV['DATABASE_URL'] ?? ($_ENV['MYSQL_URL'] ?? null));
+    if ($databaseUrl) {
+        $parts = parse_url($databaseUrl);
+        if ($parts) {
+            if (!empty($parts['host'])) $host = $parts['host'];
+            if (!empty($parts['port'])) $port = (int)$parts['port'];
+            if (!empty($parts['user'])) $user = urldecode($parts['user']);
+            if (isset($parts['pass'])) $password = urldecode($parts['pass']);
+            if (!empty($parts['path'])) $dbName = ltrim($parts['path'], '/');
         }
+    }
 
-        $options = [
-            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-            PDO::ATTR_EMULATE_PREPARES => false,
-        ];
+    // 4. Override with individual Environment Variables if set
+    $envHost = getenv('DB_HOST') ?: ($_ENV['DB_HOST'] ?? null);
+    $envPort = getenv('DB_PORT') ?: ($_ENV['DB_PORT'] ?? null);
+    $envName = getenv('DB_NAME') ?: ($_ENV['DB_NAME'] ?? null);
+    $envUser = getenv('DB_USER') ?: ($_ENV['DB_USER'] ?? null);
+    $envPass = getenv('DB_PASS');
+    if ($envPass === false) {
+        $envPass = $_ENV['DB_PASS'] ?? null;
+    }
 
-        try {
-            // First connect without dbname to ensure the database exists
-            $serverDsn = "mysql:host={$host};port={$port};charset={$charset}";
-            $serverPdo = new PDO($serverDsn, $user, $password, $options);
-            $serverPdo->exec("CREATE DATABASE IF NOT EXISTS `{$dbName}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
+    if ($envHost !== null && $envHost !== '') $host = $envHost;
+    if ($envPort !== null && $envPort !== '') $port = (int)$envPort;
+    if ($envName !== null && $envName !== '') $dbName = $envName;
+    if ($envUser !== null && $envUser !== '') $user = $envUser;
+    if ($envPass !== null) $password = $envPass;
 
-            // Connect to the target database
-            $dbDsn = "mysql:host={$host};port={$port};dbname={$dbName};charset={$charset}";
-            $pdoInstance = new PDO($dbDsn, $user, $password, $options);
-        } catch (PDOException $e) {
-            http_response_code(500);
-            header('Content-Type: application/json; charset=utf-8');
-            echo json_encode([
-                'error' => 'Database Connection Failed',
-                'message' => 'Could not connect to MySQL: ' . $e->getMessage()
-            ], JSON_UNESCAPED_UNICODE);
-            exit;
+    $options = [
+        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+        PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+        PDO::ATTR_EMULATE_PREPARES => false,
+        PDO::MYSQL_ATTR_INIT_COMMAND => "SET NAMES {$charset}"
+    ];
+
+    try {
+        // Attempt direct connection to the target database (recommended for cloud hosts where user lacks global CREATE DB permissions)
+        $dbDsn = "mysql:host={$host};port={$port};dbname={$dbName};charset={$charset}";
+        $pdoInstance = new PDO($dbDsn, $user, $password, $options);
+    } catch (PDOException $e) {
+        // If database does not exist (error 1049) on local environments, attempt auto-creation
+        if ($e->getCode() == 1049 || str_contains($e->getMessage(), 'Unknown database')) {
+            try {
+                $serverDsn = "mysql:host={$host};port={$port};charset={$charset}";
+                $serverPdo = new PDO($serverDsn, $user, $password, $options);
+                $serverPdo->exec("CREATE DATABASE IF NOT EXISTS `{$dbName}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
+                $pdoInstance = new PDO($dbDsn, $user, $password, $options);
+            } catch (PDOException $e2) {
+                renderDbError($e2);
+            }
+        } else {
+            renderDbError($e);
         }
     }
 
     return $pdoInstance;
+}
+
+function renderDbError(PDOException $e): void {
+    http_response_code(500);
+    header('Content-Type: application/json; charset=utf-8');
+    echo json_encode([
+        'error' => 'Database Connection Failed',
+        'message' => 'Could not connect to MySQL database. Please verify your environment variables or local database configuration.',
+        'details' => (getenv('APP_DEBUG') === 'true' || getenv('APP_DEBUG') === '1') ? $e->getMessage() : null
+    ], JSON_UNESCAPED_UNICODE);
+    exit;
 }
 
 // ─── Transaction Helpers ────────────────────────────────────────
@@ -83,7 +130,7 @@ function rollBack(): void {
 // ─── Data Formatting Helpers (app.js compatibility) ─────────────
 /**
  * Format a database row to match the JSON schema expected by frontend (app.js).
- * Exposes `_id` as string alias of `id`, and normalizes types.
+ * Exposes `_id` as string alias of `id`, and normalizes numeric/boolean types.
  */
 function formatRow(?array $row): ?array {
     if ($row === null) return null;
@@ -96,7 +143,10 @@ function formatRow(?array $row): ?array {
         $row['mustChangePassword'] = (bool) $row['mustChangePassword'];
     }
 
-    $floatFields = ['unitCost', 'sellingPrice', 'subtotalAmount', 'taxAmount', 'totalAmount', 'taxRate', 'lowStockThreshold', 'amountRefunded', 'cost', 'totalCost', 'price'];
+    $floatFields = [
+        'unitCost', 'sellingPrice', 'subtotalAmount', 'taxAmount', 'totalAmount', 
+        'taxRate', 'lowStockThreshold', 'amountRefunded', 'cost', 'totalCost', 'price'
+    ];
     foreach ($floatFields as $f) {
         if (isset($row[$f])) {
             $row[$f] = (float) $row[$f];
@@ -120,6 +170,20 @@ function formatRows(array $rows): array {
 // ─── Session Management ─────────────────────────────────────────
 function initSession(): void {
     if (session_status() === PHP_SESSION_NONE) {
+        // Detect HTTPS (including cloud load balancers and reverse proxies)
+        $isHttps = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
+            || (!empty($_SERVER['HTTP_X_FORWARDED_PROTO']) && $_SERVER['HTTP_X_FORWARDED_PROTO'] === 'https')
+            || (!empty($_SERVER['SERVER_PORT']) && (int)$_SERVER['SERVER_PORT'] === 443);
+
+        session_set_cookie_params([
+            'lifetime' => 86400, // 24 hours
+            'path' => '/',
+            'domain' => '',
+            'secure' => $isHttps,
+            'httponly' => true,
+            'samesite' => 'Lax'
+        ]);
+
         session_start();
     }
 }
@@ -167,7 +231,7 @@ function getRequestBody(): array {
 }
 
 function getRequestMethod(): string {
-    return $_SERVER['REQUEST_METHOD'];
+    return $_SERVER['REQUEST_METHOD'] ?? 'GET';
 }
 
 // ─── Audit Log Helper ───────────────────────────────────────────
@@ -185,7 +249,7 @@ function auditLog($userId, string $action, string $module): void {
 // ─── CORS Headers ───────────────────────────────────────────────
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type, Authorization');
+header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With');
 
 if (($_SERVER['REQUEST_METHOD'] ?? '') === 'OPTIONS') {
     http_response_code(204);
