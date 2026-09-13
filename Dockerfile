@@ -1,8 +1,11 @@
 FROM php:8.2-apache
 
-# Install system dependencies for PHP extensions
+# Install system dependencies for PHP extensions & TLS certificates
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    openssl \
     libxml2-dev \
+    && update-ca-certificates \
     && docker-php-ext-install -j$(nproc) pdo pdo_mysql dom simplexml \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*

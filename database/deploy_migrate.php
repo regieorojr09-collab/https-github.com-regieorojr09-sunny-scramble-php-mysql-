@@ -47,20 +47,23 @@ if (!$isCli) {
 }
 
 // ─── 2. Database Connection Test ──────────────────────────────────
+$GLOBALS['THROW_DB_EXCEPTION'] = true;
+
 try {
     $pdo = getDB();
 } catch (Exception $e) {
     $err = [
         'status' => 'error',
-        'message' => 'Database connection failed: ' . $e->getMessage()
+        'message' => 'Database connection failed',
+        'details' => $e->getMessage()
     ];
     if ($isCli) {
-        fwrite(STDERR, "Error: " . $e->getMessage() . "\n");
+        fwrite(STDERR, "Database Connection Error: " . $e->getMessage() . "\n");
         exit(1);
     } else {
         http_response_code(500);
         header('Content-Type: application/json; charset=utf-8');
-        echo json_encode($err, JSON_PRETTY_PRINT);
+        echo json_encode($err, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
         exit;
     }
 }
@@ -99,7 +102,8 @@ try {
     $pdo->exec("SET FOREIGN_KEY_CHECKS = 1");
     $err = [
         'status' => 'error',
-        'message' => 'Schema execution failed: ' . $e->getMessage()
+        'message' => 'Schema execution failed',
+        'details' => $e->getMessage()
     ];
     if ($isCli) {
         fwrite(STDERR, "Schema Error: " . $e->getMessage() . "\n");
@@ -107,7 +111,7 @@ try {
     } else {
         http_response_code(500);
         header('Content-Type: application/json; charset=utf-8');
-        echo json_encode($err, JSON_PRETTY_PRINT);
+        echo json_encode($err, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
         exit;
     }
 }

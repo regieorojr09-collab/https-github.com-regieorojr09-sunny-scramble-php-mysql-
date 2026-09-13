@@ -225,11 +225,13 @@ Before deploying the web application, provision a managed cloud MySQL database. 
 - **Clever Cloud / PlanetScale / Amazon RDS**
 
 Note your database connection details:
-- **Host**: e.g., `mysql-xxxx.aivencloud.com` or `containers-us-west-xx.railway.app`
-- **Port**: e.g., `3306` or assigned port
-- **Database Name**: e.g., `defaultdb` or `sunny_scramble`
+- **Host**: e.g., `gateway01.ap-southeast-1.prod.aws.tidbcloud.com` or `containers-us-west-xx.railway.app`
+- **Port**: e.g., `4000` (TiDB Serverless) or `3306` (standard MySQL)
+- **Database Name**: e.g., `test` or `sunny_scramble`
 - **Username & Password**
 - *(Or a unified URI: `mysql://user:password@host:port/dbname`)*
+
+> **Note on TiDB Cloud Serverless:** TiDB requires TLS/SSL encryption. The system automatically configures PDO SSL attributes (`PDO::MYSQL_ATTR_SSL_CA` and `PDO::MYSQL_ATTR_SSL_VERIFY_SERVER_CERT => false`) whenever connecting to remote hosts. Be sure to specify `DB_PORT=4000` (or the port assigned by TiDB).
 
 ---
 

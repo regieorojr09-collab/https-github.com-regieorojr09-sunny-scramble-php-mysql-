@@ -3,8 +3,8 @@
  * Sunny & Scramble — MySQL (PDO) Connection & Helpers
  * 
  * Provides PDO connection singleton, environment variable resolution,
- * database auto-creation / cloud DB compatibility, session management,
- * and response/formatting utilities.
+ * database auto-creation / cloud DB compatibility (TiDB Cloud SSL, Render, Railway),
+ * session management, and response/formatting utilities.
  */
 
 // ─── Load XML Config Fallback ───────────────────────────────────
@@ -42,7 +42,7 @@ function getDB(): PDO {
         $charset = (string)($appConfig->database->charset ?? $charset);
     }
 
-    // 3. Check for unified DATABASE_URL or MYSQL_URL (Render, Railway, Heroku, etc.)
+    // 3. Check for unified DATABASE_URL or MYSQL_URL (TiDB, Render, Railway, etc.)
     $databaseUrl = getenv('DATABASE_URL') ?: getenv('MYSQL_URL') ?: ($_ENV['DATABASE_URL'] ?? ($_ENV['MYSQL_URL'] ?? null));
     if ($databaseUrl) {
         $parts = parse_url($databaseUrl);
@@ -71,25 +71,66 @@ function getDB(): PDO {
     if ($envUser !== null && $envUser !== '') $user = $envUser;
     if ($envPass !== null) $password = $envPass;
 
+    // 5. Build PDO Options (including TiDB Cloud / SSL configuration)
     $options = [
-        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+        PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
         PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-        PDO::ATTR_EMULATE_PREPARES => false,
+        PDO::ATTR_EMULATE_PREPARES   => false,
         PDO::MYSQL_ATTR_INIT_COMMAND => "SET NAMES {$charset}"
     ];
 
+    // Detect if SSL should be enabled (remote host such as TiDB Cloud, or DB_SSL flag)
+    $isLocal = in_array(strtolower($host), ['localhost', '127.0.0.1', '::1']);
+    $dbSslEnv = getenv('DB_SSL') ?: ($_ENV['DB_SSL'] ?? null);
+    $enableSsl = ($dbSslEnv === 'true' || $dbSslEnv === '1') || ($dbSslEnv !== 'false' && !$isLocal);
+
+    if ($enableSsl) {
+        // Look for system CA certificates bundle (Debian/Ubuntu/Docker container)
+        $caBundle = null;
+        $candidatePaths = [
+            '/etc/ssl/certs/ca-certificates.crt', // Debian / Ubuntu / Docker
+            '/etc/pki/tls/certs/ca-bundle.crt',   // CentOS / RHEL
+            '/etc/ssl/cert.pem',                  // Alpine / macOS
+            ini_get('openssl.cafile') ?: null,
+            ini_get('curl.cainfo') ?: null
+        ];
+        foreach ($candidatePaths as $path) {
+            if ($path && @file_exists($path)) {
+                $caBundle = $path;
+                break;
+            }
+        }
+
+        $options[PDO::MYSQL_ATTR_SSL_CA] = $caBundle ?: true;
+        $options[PDO::MYSQL_ATTR_SSL_VERIFY_SERVER_CERT] = false;
+    }
+
+    $dbDsn = "mysql:host={$host};port={$port};dbname={$dbName};charset={$charset}";
+
     try {
-        // Attempt direct connection to the target database (recommended for cloud hosts where user lacks global CREATE DB permissions)
-        $dbDsn = "mysql:host={$host};port={$port};dbname={$dbName};charset={$charset}";
+        // Attempt direct connection to the target database
         $pdoInstance = new PDO($dbDsn, $user, $password, $options);
     } catch (PDOException $e) {
+        // If SSL with file path failed, attempt fallback to boolean true
+        if ($enableSsl && isset($options[PDO::MYSQL_ATTR_SSL_CA]) && $options[PDO::MYSQL_ATTR_SSL_CA] !== true) {
+            try {
+                $options[PDO::MYSQL_ATTR_SSL_CA] = true;
+                $pdoInstance = new PDO($dbDsn, $user, $password, $options);
+                return $pdoInstance;
+            } catch (PDOException $eSsl) {
+                // Keep original or new exception
+                $e = $eSsl;
+            }
+        }
+
         // If database does not exist (error 1049) on local environments, attempt auto-creation
-        if ($e->getCode() == 1049 || str_contains($e->getMessage(), 'Unknown database')) {
+        if ($isLocal && ($e->getCode() == 1049 || str_contains($e->getMessage(), 'Unknown database'))) {
             try {
                 $serverDsn = "mysql:host={$host};port={$port};charset={$charset}";
                 $serverPdo = new PDO($serverDsn, $user, $password, $options);
                 $serverPdo->exec("CREATE DATABASE IF NOT EXISTS `{$dbName}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
                 $pdoInstance = new PDO($dbDsn, $user, $password, $options);
+                return $pdoInstance;
             } catch (PDOException $e2) {
                 renderDbError($e2);
             }
@@ -102,13 +143,17 @@ function getDB(): PDO {
 }
 
 function renderDbError(PDOException $e): void {
+    if (!empty($GLOBALS['THROW_DB_EXCEPTION'])) {
+        throw $e;
+    }
+
     http_response_code(500);
     header('Content-Type: application/json; charset=utf-8');
     echo json_encode([
         'error' => 'Database Connection Failed',
         'message' => 'Could not connect to MySQL database. Please verify your environment variables or local database configuration.',
-        'details' => (getenv('APP_DEBUG') === 'true' || getenv('APP_DEBUG') === '1') ? $e->getMessage() : null
-    ], JSON_UNESCAPED_UNICODE);
+        'details' => $e->getMessage()
+    ], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
     exit;
 }
 
